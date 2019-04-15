@@ -4,15 +4,17 @@
 
 #define STEPS_PER_REV 200
 #define MIN_PULSE_DELAY 1400
-#define CENTER_POT_VAL 755 // 90 degrees occurs at 520
+#define CENTER_POT_VAL 754.9 // 90 degrees occurs at 520 ; higher  to move setpoint away
 
 #define MASS 10
-#define dT 10 // in milliseconds
-#define Kp 2
-#define Kd 0.1
+#define NUM_STEPS 2
+#define Kp 200
+#define Kd 400
 
-int steps[3] = {0, 0, 0};
 int pastError = 0;
+int pastDT = 10;
+
+bool debug = true;
 
 void setup() {
   // put your setup code here, to run once:
@@ -21,46 +23,50 @@ void setup() {
   pinMode(POT_PIN, INPUT);
   pinMode(13, OUTPUT);
 
+  if(debug){
+    Serial.begin(19200);  
+  }
   Serial.begin(19200);
 }
 
 void loop() {
   int potValue = analogRead(POT_PIN);
-  int error = potValue - CENTER_POT_VAL;
+  float error = potValue - CENTER_POT_VAL;
+  error =  error;
+  //Serial.println(error);
 
-  int proportional = error * Kp;
-  float derivative = (error - pastError) / ((float)dT) * Kd; // division after scaling
+//  int steps = (int)(error * -1);
+//  Serial.println(steps);
+//  step(steps);
 
-  
-  
+  float proportional = error * Kp;
+  float derivative = (error - pastError) / ((float)pastDT + 0.001) * Kd; // division after scaling
+
   int desiredForce = -1*(proportional + derivative);
-  steps[2] = getSteps(desiredForce);
-  step(steps[2]);
+  double currentDT = getDT(desiredForce);
+  stepDT(currentDT);
 
-  Serial.print("*************\nProportional: ");
-  Serial.println(proportional);
-  Serial.print("Derivative: ");
-  Serial.println(derivative);
-  Serial.print("Steps: [");
-  Serial.print(steps[0]);
-  Serial.print(", ");
-  Serial.print(steps[1]);
-  Serial.print(", ");
-  Serial.print(steps[2]);
-  Serial.println("]\n****************");
+  if(debug){
+    //Serial.print("*************\nProportional: ");
+    //Serial.println(proportional);
+    //Serial.print("Derivative: ");
+    //Serial.println(derivative);
+    //Serial.println("\n****************");  
+    //Serial.println(desiredForce);
+  }
 
-  // Shift steps left by 1
-  steps[0] = steps[1];
-  steps[1] = steps[2];
-
+  pastDT = abs(currentDT);
   pastError = error;
-  digitalWrite(13, !digitalRead(13));
-  delay(dT);
+  
+//  digitalWrite(13, !digitalRead(13));
 }
 
-int getSteps(int desiredForce) {
-  int accel = desiredForce / MASS;
-  return ((steps[1]) / dT + accel) * dT;
+double getDT(int desiredForce) {
+  bool neg = desiredForce < 0;
+  double acc = abs(desiredForce) / (double)MASS;
+  double dT = -1 * NUM_STEPS - sqrt(4 * acc * NUM_STEPS * pastDT * pastDT + NUM_STEPS * NUM_STEPS) / 2 / acc / (0.001+ pastDT);
+  dT = 2000 / (acc + 5);
+  return neg ? -1 * dT : dT;
 }
 
 void testStepper() {
@@ -69,6 +75,30 @@ void testStepper() {
   }
   for(int i = 10; i > 0; i--) {
     step(-1 * STEPS_PER_REV / 10);
+  }
+}
+
+void stepDT(double dT) {
+  digitalWrite(DIR_PIN, LOW);
+  if(dT < 0) {
+    digitalWrite(DIR_PIN, HIGH);
+    dT = -1 * dT;
+  }
+  if(debug) {
+    ////Serial.print("dT: ");
+    //Serial.println(dT);
+  }
+  //int delayTime = (dT * 1000) / NUM_STEPS / 2;
+  int delayTime = dT;
+  delayTime = max(delayTime, 30);
+  delayTime = min(delayTime, 50);
+  delayTime = map(delayTime, 30, 50, 1400, 3000);
+  //Serial.println(delayTime);
+  for(int i = 0; i < NUM_STEPS; i++) {
+    digitalWrite(STEP_PIN, HIGH);
+    delayMicroseconds(delayTime);
+    digitalWrite(STEP_PIN, LOW);
+    delayMicroseconds(delayTime);
   }
 }
 
@@ -81,7 +111,8 @@ void step(int numSteps) {
   }
   Serial.print("Num steps (unclipped): ");
   Serial.println(numSteps);
-  numSteps = min(numSteps, 50);
+  numSteps = min(numSteps, 100);
+  
   for(int i = 0; i < numSteps; i++) {
     digitalWrite(STEP_PIN, HIGH);
     delayMicroseconds(1400);
